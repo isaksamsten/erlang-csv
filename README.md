@@ -6,7 +6,7 @@ Simple csv parser for erlang
 Usage
 
 ```
-Parser = csv:parser("file.csv"),
+Parser = csv:reader("file.csv"),
 case csv:next_line(Parser) of
      {ok, Line, Id} ->
      	 io:format("~p: ~p ~n", [Id, Line]);
