@@ -27,20 +27,24 @@ spawn_binary_parser(File) ->
     end.
 
 parse_binary_incremental(Bin, Counter) ->
-    {Line, Rest} = parse_binary_line(Bin, <<>>, []),
+    {Line, Rest} = binary_next_line(Bin, <<>>),
     case Line of
 	eof ->
 	    receive
-		{more, Parent} ->
+		{Any, Parent} when Any == more; Any == raw ->
 		    Parent ! {eof, Parent},
 		    parse_binary_incremental(Rest, Counter + 1)
 	    end;
 	Line ->
 	    receive
 		{more, Parent} ->
-		    Parent ! {ok, Parent, Line, Counter},
+		    Item = parse_binary_line(Line, <<>>, []),
+		    Parent ! {ok, Parent, Item, Counter},
+		    parse_binary_incremental(Rest, Counter + 1);
+		{raw, Parent} ->
+		    Parent ! {raw, Parent, Line, Counter},
 		    parse_binary_incremental(Rest, Counter + 1)
-	    end		
+	    end	
     end.
 
 spawn_parser(File) ->
@@ -89,16 +93,44 @@ get_next_line({csv_reader, Pid}) ->
 	    eof		
     end.
 
-parse_binary_line(<<$\n, Rest/binary>>, Str, Acc) ->
+get_next_raw({csv_reader, Pid}) ->
+    Self = self(),
+    Ref = monitor(process, Pid),
+    Pid ! {raw, Self},
+    receive
+	{raw, Self, Item, Id} ->
+	    demonitor(Ref),
+	    {ok, Item, Id};
+	{eof, Self} ->
+	    demonitor(Ref),
+	    eof;
+	{'DOWN', Ref, _, _, _} ->
+	    demonitor(Ref),
+	    eof
+    end.
+
+binary_next_line(<<>>, _) ->
+    {eof, <<>>};
+binary_next_line(<<$\n, Rest/binary>>, Acc) ->
+    {<<Acc/binary, $\n>>, Rest};
+binary_next_line(<<$\r, Rest/binary>>, Acc) -> %% NOTE: skip \r
+    binary_next_line(Rest, Acc);
+binary_next_line(<<Any, Rest/binary>>, Acc) ->
+    binary_next_line(Rest, <<Acc/binary, Any>>).
+
+
+parse_binary_line(Binary) ->
+    parse_binary_line(Binary, <<>>, []).
+parse_binary_line(<<$\n, _Rest/binary>>, Str, Acc) ->
     Acc0 = case Str of
 	       <<>> ->
 		   Acc;
 	       _ ->
 		   [string:strip(binary_to_list(Str))|Acc]
 	   end,
-    {lists:reverse(Acc0), Rest};
+    lists:reverse(Acc0);
 parse_binary_line(<<>>, _, _Acc) ->
-    {eof, <<>>};
+    [];
 parse_binary_line(<<$\r, Rest/binary>>, Str, Acc) -> %% NOTE: skip \r
     parse_binary_line(Rest, Str, Acc);
 parse_binary_line(<<$", $,, Rest/binary>>, _Str, Acc) ->
