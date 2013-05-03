@@ -15,6 +15,34 @@
 reader(File) ->
     {csv_reader, spawn_link(?MODULE, spawn_parser, [File])}.
 
+binary_reader(File) ->
+    {csv_reader, spawn_link(?MODULE, spawn_binary_parser, [File])}.
+
+spawn_binary_parser(File) ->
+    case file:read_file(File) of
+	{ok, Bin} ->
+	    parse_binary_incremental(Bin, 1);
+	_ ->
+	    throw({error, file_not_found})
+    end.
+
+parse_binary_incremental(Bin, Counter) ->
+    {Line, Rest} = parse_binary_line(Bin, <<>>, []),
+    case Line of
+	eof ->
+	    receive
+		{more, Parent} ->
+		    Parent ! {eof, Parent},
+		    parse_binary_incremental(Rest, Counter + 1)
+	    end;
+	Line ->
+	    receive
+		{more, Parent} ->
+		    Parent ! {ok, Parent, Line, Counter},
+		    parse_binary_incremental(Rest, Counter + 1)
+	    end		
+    end.
+
 spawn_parser(File) ->
     case file:open(File, [read, read_ahead]) of
 	{ok, Io} ->
@@ -60,7 +88,35 @@ get_next_line({csv_reader, Pid}) ->
 	    demonitor(Ref),
 	    eof		
     end.
-	    
+
+parse_binary_line(<<$\n, Rest/binary>>, Str, Acc) ->
+    Acc0 = case Str of
+	       <<>> ->
+		   Acc;
+	       _ ->
+		   [string:strip(binary_to_list(Str))|Acc]
+	   end,
+    {lists:reverse(Acc0), Rest};
+parse_binary_line(<<>>, _, _Acc) ->
+    {eof, <<>>};
+parse_binary_line(<<$\r, Rest/binary>>, Str, Acc) -> %% NOTE: skip \r
+    parse_binary_line(Rest, Str, Acc);
+parse_binary_line(<<$", $,, Rest/binary>>, _Str, Acc) ->
+    parse_binary_line(Rest, <<>>, ["\""|Acc]);
+parse_binary_line(<<$", Rest/binary>>, Str, Acc) ->
+    parse_binary_string(Rest, Str, Acc);
+parse_binary_line(<<$,, Rest/binary>>, Str, Acc) ->
+    parse_binary_line(Rest, <<>>, [string:strip(binary_to_list(Str))|Acc]);
+parse_binary_line(<<I, Rest/binary>>, Str, Acc) ->
+    parse_binary_line(Rest, <<Str/binary, I>>, Acc).
+
+parse_binary_string(<<$", $,, Rest/binary>>, Str, Acc) ->
+    parse_binary_line(Rest, <<>>, [string:strip(binary_to_list(Str))|Acc]);
+parse_binary_string(<<$", Rest/binary>>, Str, Acc) ->
+    parse_binary_line(Rest, <<>>, [string:strip(binary_to_list(Str))|Acc]);
+parse_binary_string(<<I, Rest/binary>>, Str, Acc) ->
+    parse_binary_string(Rest, <<Str/binary, I>>, Acc).
+
 
 parse_line(Line, Acc) ->
     lists:reverse(parse_line(Line, [], Acc)).
