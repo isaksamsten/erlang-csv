@@ -27,21 +27,22 @@ spawn_binary_parser(File) ->
     end.
 
 parse_binary_incremental(Bin, Counter) ->
-    {Line, Rest} = binary_next_line(Bin, <<>>), %% note: only check for EOF
-    case Line of
-	eof ->
+    Eof = binary_eof(Bin),
+    case Eof of
+	true ->
 	    receive
 		{Any, Parent} when Any == more; Any == raw ->
 		    Parent ! {eof, Parent},
-		    parse_binary_incremental(Rest, Counter + 1)
+		    parse_binary_incremental(<<>>, Counter + 1)
 	    end;
-	Line ->
+	false ->
 	    receive
 		{more, Parent} ->
-		    Item = parse_binary_line(Line, <<>>, []),
+		    {Item, Rest} = parse_binary_line(Bin, <<>>, []),
 		    Parent ! {ok, Parent, Item, Counter},
 		    parse_binary_incremental(Rest, Counter + 1);
 		{raw, Parent} ->
+		    {Line, Rest} = binary_next_line(Bin, <<>>), %% note: only check for EOF
 		    Parent ! {raw, Parent, Line, Counter},
 		    parse_binary_incremental(Rest, Counter + 1)
 	    end	
@@ -109,6 +110,12 @@ get_next_raw({csv_reader, Pid}) ->
 	    eof
     end.
 
+binary_eof(<<>>) ->
+    true;
+binary_eof(_) ->
+    false.
+
+
 binary_next_line(<<>>, _) ->
     {eof, <<>>};
 binary_next_line(<<$\n, Rest/binary>>, Acc) ->
@@ -121,16 +128,17 @@ binary_next_line(<<Any, Rest/binary>>, Acc) ->
 
 parse_binary_line(Binary) ->
     parse_binary_line(Binary, <<>>, []).
-parse_binary_line(<<$\n, _Rest/binary>>, Str, Acc) ->
+
+parse_binary_line(<<$\n, Rest/binary>>, Str, Acc) ->
     Acc0 = case Str of
 	       <<>> ->
 		   Acc;
 	       _ ->
 		   [string:strip(binary_to_list(Str))|Acc]
 	   end,
-    lists:reverse(Acc0);
+    {lists:reverse(Acc0), Rest};
 parse_binary_line(<<>>, _, _Acc) ->
-    [];
+    {[], <<>>};
 parse_binary_line(<<$\r, Rest/binary>>, Str, Acc) -> %% NOTE: skip \r
     parse_binary_line(Rest, Str, Acc);
 parse_binary_line(<<$", $,, Rest/binary>>, _Str, Acc) ->
