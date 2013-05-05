@@ -27,7 +27,7 @@ spawn_binary_parser(File) ->
     end.
 
 parse_binary_incremental(Bin, Counter) ->
-    {Line, Rest} = binary_next_line(Bin, <<>>),
+    {Line, Rest} = binary_next_line(Bin, <<>>), %% note: only check for EOF
     case Line of
 	eof ->
 	    receive
