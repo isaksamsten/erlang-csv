@@ -33,7 +33,9 @@ parse_binary_incremental(Bin, Counter) ->
 	    receive
 		{Any, Parent} when Any == more; Any == raw ->
 		    Parent ! {eof, Parent},
-		    parse_binary_incremental(<<>>, Counter + 1)
+		    parse_binary_incremental(<<>>, Counter + 1);
+		{exit, Parent} ->
+		    Parent ! exit
 	    end;
 	false ->
 	    receive
@@ -44,7 +46,9 @@ parse_binary_incremental(Bin, Counter) ->
 		{raw, Parent} ->
 		    {Line, Rest} = binary_next_line(Bin, <<>>), %% note: only check for EOF
 		    Parent ! {raw, Parent, Line, Counter},
-		    parse_binary_incremental(Rest, Counter + 1)
+		    parse_binary_incremental(Rest, Counter + 1);
+		{exit, Parent} ->
+		    Parent ! exit
 	    end	
     end.
 
@@ -63,17 +67,32 @@ parse_incremental(Io, Counter) ->
 	    receive
 		{more, Parent} ->
 		    Parent ! {ok, Parent, Item, Counter},
-		    parse_incremental(Io, Counter + 1)
+		    parse_incremental(Io, Counter + 1);
+		{exit, Parent} ->
+		    Parent ! exit
 	    end;
 	eof ->
 	    receive 
 		{more, Parent} ->
 		    Parent ! {eof, Parent},
-		    parse_incremental(Io, Counter)			
+		    parse_incremental(Io, Counter);
+		{exit, Parent} ->
+		    Parent ! exit
 	    end;
 	{error, Reason} ->
 	    throw({error, Reason})
     end.
+
+kill({csv_reader, Pid}) ->
+    Ref = monitor(process, Pid),
+    Pid ! {exit, self()},
+    receive
+	exit ->
+	    ok;
+	{'DOWN', Ref, _, _, _} ->
+	    demonitor(Ref),
+	    ok
+    end.    
 
 next_line(Reader) ->
     get_next_line(Reader).
