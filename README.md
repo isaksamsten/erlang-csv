@@ -14,3 +14,5 @@ case csv:next_line(Parser) of
      	 io:format("End of csv-file ~n")
 end
 ```
+
+TODO: clean up code and improve (to e.g. allow custom separators, etc)
