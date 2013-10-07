@@ -9,6 +9,13 @@
 -module(csv).
 -compile(export_all).
 
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+-endif.
+
+
 %%
 %% Spawn a 
 %%
@@ -40,7 +47,7 @@ parse_binary_incremental(Bin, Counter) ->
 	false ->
 	    receive
 		{more, Parent} ->
-		    {Item, Rest} = parse_binary_line(Bin, <<>>, []),
+		    {Item, Rest} = parse_binary_line(Bin),
 		    Parent ! {ok, Parent, Item, Counter},
 		    parse_binary_incremental(Rest, Counter + 1);
 		{raw, Parent} ->
@@ -146,18 +153,30 @@ binary_next_line(<<Any, Rest/binary>>, Acc) ->
 
 
 parse_binary_line(Binary) ->
-    parse_binary_line(Binary, <<>>, []).
+    case parse_binary_line(Binary, <<>>, []) of
+	{none, Rest} ->
+	    parse_binary_line(Rest);
+	Other ->
+	    Other
+    end.
 
-parse_binary_line(<<$\n, Rest/binary>>, Str, Acc) ->
+end_of_line(Rest, Str, Acc) ->
     Acc0 = case Str of
 	       <<>> ->
 		   Acc;
-	       _ ->
-		   [string:strip(binary_to_list(Str))|Acc]
+		_ ->
+		    [string:strip(binary_to_list(Str))|Acc]
 	   end,
-    {lists:reverse(Acc0), Rest};
-parse_binary_line(<<>>, _, _Acc) ->
-    {[], <<>>};
+    {lists:reverse(Acc0), Rest}.
+
+parse_binary_line(<<$#,$@, _Rest>>, _, _) ->
+    throw({not_implemented_yet, "dont use #@"});
+parse_binary_line(<<$#, Rest/binary>>, _, _) ->
+    {none, skip_line(Rest)};
+parse_binary_line(<<$\n, Rest/binary>>, Str, Acc) ->
+   end_of_line(Rest, Str, Acc);
+parse_binary_line(<<>>, Str, Acc) ->
+    end_of_line(<<>>, Str, Acc);
 parse_binary_line(<<$\r, Rest/binary>>, Str, Acc) -> %% NOTE: skip \r
     parse_binary_line(Rest, Str, Acc);
 parse_binary_line(<<$", $,, Rest/binary>>, _Str, Acc) ->
@@ -176,6 +195,13 @@ parse_binary_string(<<$", Rest/binary>>, Str, Acc) ->
 parse_binary_string(<<I, Rest/binary>>, Str, Acc) ->
     parse_binary_string(Rest, <<Str/binary, I>>, Acc).
 
+skip_line(<<$\r, Rest/binary>>) ->
+    skip_line(Rest);
+skip_line(<<$\n, Rest/binary>>) ->
+    Rest;
+skip_line(<<_, Rest/binary>>) ->
+    skip_line(Rest).
+
 
 parse_line(Line, Acc) ->
     lists:reverse(parse_line(Line, [], Acc)).
@@ -192,6 +218,8 @@ parse_line([End], Str, Acc) ->
 	_ ->
 	    [string:strip(lists:reverse(Str0))|Acc]
     end;
+parse_line([$#|_], _, Acc) ->
+    Acc;
 parse_line([$", $,|R], _, Acc) ->
     parse_line(R, [], ["\""|Acc]);
 parse_line([$"|R], Str, Acc) ->
@@ -207,3 +235,11 @@ parse_string([$"|R], Str, Acc) ->
     parse_line(R, [], [string:strip(lists:reverse(Str))|Acc]);
 parse_string([I|R], Str, Acc) ->
     parse_string(R, [I|Str], Acc).
+
+-ifdef(TEST).
+comment_test() ->
+    Csv = binary_reader("../test/csv_comment.csv"),
+    Line = next_line(Csv),
+    ?assertEqual(["hello", "world"], element(2, Line)).
+
+-endif.
