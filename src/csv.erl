@@ -2,8 +2,13 @@
 %% Very basic CSV parser of limited use.
 %%
 %% It can only handle one type of separators (,)
-%% string nesting
-%%
+%% and simple strings
+%% 
+%% Version 0.2:
+%%   - comment (line starting with %) and 
+%%     annotation support (line starting with %@key value)
+%% Version 0.1:
+%%   - initial release
 %% Author: Isak Karlsson <isak-kar@dsv.su.se>
 %%
 -module(csv).
@@ -16,44 +21,49 @@
 -endif.
 
 
-%%
-%% Spawn a 
-%%
 reader(File) ->
     {csv_reader, spawn_link(?MODULE, spawn_parser, [File])}.
 
+binary_reader(File, Opts) ->
+    Annotations = proplists:get_value(annotations, Opts, false),
+    {csv_reader, spawn_link(?MODULE, spawn_binary_parser, [File, Annotations])}.
 binary_reader(File) ->
-    {csv_reader, spawn_link(?MODULE, spawn_binary_parser, [File])}.
+    binary_reader(File, []).
 
-spawn_binary_parser(File) ->
+spawn_binary_parser(File, Annot) ->
     case file:read_file(File) of
 	{ok, Bin} ->
-	    parse_binary_incremental(Bin, 1);
+	    parse_binary_incremental(Bin, 1, Annot);
 	_ ->
 	    throw({error, file_not_found})
     end.
 
-parse_binary_incremental(Bin, Counter) ->
+parse_binary_incremental(Bin, Counter, Annot) ->
     Eof = binary_eof(Bin),
     case Eof of
 	true ->
 	    receive
 		{Any, Parent} when Any == more; Any == raw ->
 		    Parent ! {eof, Parent},
-		    parse_binary_incremental(<<>>, Counter + 1);
+		    parse_binary_incremental(<<>>, Counter + 1, Annot);
 		{exit, Parent} ->
 		    Parent ! exit
 	    end;
 	false ->
 	    receive
 		{more, Parent} ->
-		    {Item, Rest} = parse_binary_line(Bin),
-		    Parent ! {ok, Parent, Item, Counter},
-		    parse_binary_incremental(Rest, Counter + 1);
+		    case parse_binary_line(Bin, Annot) of
+			{item, {Item, Rest}} ->
+			    Parent ! {row, Parent, Item, Counter},
+			    parse_binary_incremental(Rest, Counter + 1, Annot);
+			{annotation, {Kv, Rest}} ->
+			    Parent ! {annotation, Parent, Kv},
+			    parse_binary_incremental(Rest, Counter, Annot)
+		    end;
 		{raw, Parent} ->
 		    {Line, Rest} = binary_next_line(Bin, <<>>), %% note: only check for EOF
 		    Parent ! {raw, Parent, Line, Counter},
-		    parse_binary_incremental(Rest, Counter + 1);
+		    parse_binary_incremental(Rest, Counter + 1, Annot);
 		{exit, Parent} ->
 		    Parent ! exit
 	    end	
@@ -109,9 +119,12 @@ get_next_line({csv_reader, Pid}) ->
     Ref = monitor(process, Pid),
     Pid ! {more, Self},
     receive
-	{ok, Self, Item, Id} ->
+	{row, Self, Item, Id} ->
 	    demonitor(Ref),
-	    {ok, Item, Id};
+	    {row, Item, Id};
+	{annotation, Self, Kv} ->
+	    demonitor(Ref),
+	    {annotation, Kv};
 	{eof, Self} ->
 	    demonitor(Ref),
 	    eof;
@@ -152,12 +165,18 @@ binary_next_line(<<Any, Rest/binary>>, Acc) ->
     binary_next_line(Rest, <<Acc/binary, Any>>).
 
 
-parse_binary_line(Binary) ->
+parse_binary_line(Binary, Annot) ->
     case parse_binary_line(Binary, <<>>, []) of
-	{none, Rest} ->
-	    parse_binary_line(Rest);
+	{comment, Rest} ->
+	    parse_binary_line(Rest, Annot);
+	{annotation, {Kv, Rest}} ->
+	    if not(Annot) ->
+		    parse_binary_line(Rest, Annot);
+	       true ->
+		    {annotation, {Kv, Rest}}
+	    end;
 	Other ->
-	    Other
+	    {item, Other}
     end.
 
 end_of_line(Rest, Str, Acc) ->
@@ -167,12 +186,20 @@ end_of_line(Rest, Str, Acc) ->
 		_ ->
 		    [string:strip(binary_to_list(Str))|Acc]
 	   end,
-    {lists:reverse(Acc0), Rest}.
+    case Acc0 of
+	[] ->
+	    {comment, Rest};
+	FinalAcc ->
+	    {lists:reverse(FinalAcc), Rest}
+    end.
 
-parse_binary_line(<<$#,$@, _Rest>>, _, _) ->
-    throw({not_implemented_yet, "dont use #@"});
-parse_binary_line(<<$#, Rest/binary>>, _, _) ->
-    {none, skip_line(Rest)};
+parse_binary_line(<<$%, Annotation, Rest/binary>>, _, _) ->
+    case is_annotation(Annotation) of
+	true ->
+	    {annotation, parse_annotation(Rest)};
+	false ->
+	    {comment, skip_line(Rest)}
+    end;
 parse_binary_line(<<$\n, Rest/binary>>, Str, Acc) ->
    end_of_line(Rest, Str, Acc);
 parse_binary_line(<<>>, Str, Acc) ->
@@ -202,6 +229,27 @@ skip_line(<<$\n, Rest/binary>>) ->
 skip_line(<<_, Rest/binary>>) ->
     skip_line(Rest).
 
+is_annotation(A) when A == $@ ->
+    true;
+is_annotation(_) ->
+    false.
+
+parse_annotation(A) ->
+    {Key, Rest0} = parse_annotation_key(A, <<>>),
+    {Value, Rest1} = parse_annotation_value(Rest0, <<>>),
+    {{Key, Value}, Rest1}.
+
+parse_annotation_key(<<$ , Rest/binary>>, Acc) ->
+    {Acc, Rest};
+parse_annotation_key(<<C, Rest/binary>>, Acc) ->
+    parse_annotation_key(Rest, <<Acc/binary,C>>).
+
+parse_annotation_value(<<$\r, Rest/binary>>, Acc) ->
+    parse_annotation_value(Rest, Acc);
+parse_annotation_value(<<$\n, Rest/binary>>, Acc) ->
+    {Acc, Rest};
+parse_annotation_value(<<C, Rest/binary>>, Acc) ->
+    parse_annotation_value(Rest, <<Acc/binary,C>>).
 
 parse_line(Line, Acc) ->
     lists:reverse(parse_line(Line, [], Acc)).
@@ -218,7 +266,7 @@ parse_line([End], Str, Acc) ->
 	_ ->
 	    [string:strip(lists:reverse(Str0))|Acc]
     end;
-parse_line([$#|_], _, Acc) ->
+parse_line([$%|_], _, Acc) ->
     Acc;
 parse_line([$", $,|R], _, Acc) ->
     parse_line(R, [], ["\""|Acc]);
@@ -237,9 +285,24 @@ parse_string([I|R], Str, Acc) ->
     parse_string(R, [I|Str], Acc).
 
 -ifdef(TEST).
-comment_test() ->
-    Csv = binary_reader("../test/csv_comment.csv"),
-    Line = next_line(Csv),
-    ?assertEqual(["hello", "world"], element(2, Line)).
+annotation_test() ->
+    Csv = binary_reader("../test/csv_comment.csv", [{annotations, true}]),
+    {annotation, {Url, Http}} = next_line(Csv),
+    ?assertEqual(<<"url">>, Url),
+    ?assertEqual(<<"http://people.dsv.su.se/~isak-kar">>, Http),
+
+    {annotation, {Name, TheName}} = next_line(Csv),
+    ?assertEqual(<<"name">>, Name),
+    ?assertEqual(<<"Hello World">>, TheName),
+
+    {row, Line, Count} = next_line(Csv),
+    ?assertEqual(["hello", "world"], Line),
+    ?assertEqual(1, Count).
+
+ignore_annotation_test() ->
+    Csv = binary_reader("../test/csv_comment.csv", [{annotations, false}]),    
+    {row, Line, Count} = next_line(Csv),
+    ?assertEqual(["hello", "world"], Line),
+    ?assertEqual(1, Count).
 
 -endif.

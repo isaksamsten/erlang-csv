@@ -1,2 +1,12 @@
-# hedsa
+%% comment!
+%% This is a comment for this file
+%% this comment continues here
+%% the thing below are annotations that
+%% can be used to describe the text
+%% no restriction is enforced on the annotations
+%% except that they cannot span more than one line
+%% and be separated by more than one space
+
+%@url http://people.dsv.su.se/~isak-kar
+%@name Hello World
 hello,world
