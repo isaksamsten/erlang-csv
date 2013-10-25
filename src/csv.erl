@@ -22,93 +22,93 @@
 
 
 reader(File) ->
-    {csv_reader, spawn_link(?MODULE, spawn_parser, [File])}.
+    {?MODULE, {csv_reader, spawn_link(?MODULE, spawn_parser, [File])}}.
 
 binary_reader(File, Opts) ->
     Annotations = proplists:get_value(annotations, Opts, false),
-    {csv_reader, spawn_link(?MODULE, spawn_binary_parser, [File, Annotations])}.
+    {?MODULE, {csv_reader, spawn_link(?MODULE, spawn_binary_parser, [File, Annotations])}}.
 binary_reader(File) ->
     binary_reader(File, []).
 
 spawn_binary_parser(File, Annot) ->
     case file:read_file(File) of
-	{ok, Bin} ->
-	    parse_binary_incremental(Bin, 1, Annot);
-	_ ->
-	    throw({error, file_not_found})
+        {ok, Bin} ->
+            parse_binary_incremental(Bin, 1, Annot);
+        _ ->
+            throw({error, file_not_found})
     end.
 
 parse_binary_incremental(Bin, Counter, Annot) ->
     Eof = binary_eof(Bin),
     case Eof of
-	true ->
-	    receive
-		{Any, Parent} when Any == more; Any == raw ->
-		    Parent ! {eof, Parent},
-		    parse_binary_incremental(<<>>, Counter + 1, Annot);
-		{exit, Parent} ->
-		    Parent ! exit
-	    end;
-	false ->
-	    receive
-		{more, Parent} ->
-		    case parse_binary_line(Bin, Annot) of
-			{item, {Item, Rest}} ->
-			    Parent ! {row, Parent, Item, Counter},
-			    parse_binary_incremental(Rest, Counter + 1, Annot);
-			{annotation, {Kv, Rest}} ->
-			    Parent ! {annotation, Parent, Kv},
-			    parse_binary_incremental(Rest, Counter, Annot)
-		    end;
-		{raw, Parent} ->
-		    {Line, Rest} = binary_next_line(Bin, <<>>), %% note: only check for EOF
-		    Parent ! {raw, Parent, Line, Counter},
-		    parse_binary_incremental(Rest, Counter + 1, Annot);
-		{exit, Parent} ->
-		    Parent ! exit
-	    end	
+        true ->
+            receive
+                {Any, Parent} when Any == more; Any == raw ->
+                    Parent ! {eof, Parent},
+                    parse_binary_incremental(<<>>, Counter + 1, Annot);
+                {exit, Parent} ->
+                    Parent ! exit
+            end;
+        false ->
+            receive
+                {more, Parent} ->
+                    case parse_binary_line(Bin, Annot) of
+                        {item, {Item, Rest}} ->
+                            Parent ! {row, Parent, Item, Counter},
+                            parse_binary_incremental(Rest, Counter + 1, Annot);
+                        {annotation, {Kv, Rest}} ->
+                            Parent ! {annotation, Parent, Kv},
+                            parse_binary_incremental(Rest, Counter, Annot)
+                    end;
+                {raw, Parent} ->
+                    {Line, Rest} = binary_next_line(Bin, <<>>), %% note: only check for EOF
+                    Parent ! {raw, Parent, Line, Counter},
+                    parse_binary_incremental(Rest, Counter + 1, Annot);
+                {exit, Parent} ->
+                    Parent ! exit
+            end 
     end.
 
 spawn_parser(File) ->
     case file:open(File, [read, read_ahead]) of
-	{ok, Io} ->
-	    parse_incremental(Io, 1);
-	_ ->
-	    throw({error, file_not_found})
+        {ok, Io} ->
+            parse_incremental(Io, 1);
+        _ ->
+            throw({error, file_not_found})
     end.
 
 parse_incremental(Io, Counter) ->
     case file:read_line(Io) of
-	{ok, Line} ->
-	    Item = parse_line(Line, []),
-	    receive
-		{more, Parent} ->
-		    Parent ! {ok, Parent, Item, Counter},
-		    parse_incremental(Io, Counter + 1);
-		{exit, Parent} ->
-		    Parent ! exit
-	    end;
-	eof ->
-	    receive 
-		{more, Parent} ->
-		    Parent ! {eof, Parent},
-		    parse_incremental(Io, Counter);
-		{exit, Parent} ->
-		    Parent ! exit
-	    end;
-	{error, Reason} ->
-	    throw({error, Reason})
+        {ok, Line} ->
+            Item = parse_line(Line, []),
+            receive
+                {more, Parent} ->
+                    Parent ! {ok, Parent, Item, Counter},
+                    parse_incremental(Io, Counter + 1);
+                {exit, Parent} ->
+                    Parent ! exit
+            end;
+        eof ->
+            receive 
+                {more, Parent} ->
+                    Parent ! {eof, Parent},
+                    parse_incremental(Io, Counter);
+                {exit, Parent} ->
+                    Parent ! exit
+            end;
+        {error, Reason} ->
+            throw({error, Reason})
     end.
 
 kill({csv_reader, Pid}) ->
     Ref = monitor(process, Pid),
     Pid ! {exit, self()},
     receive
-	exit ->
-	    ok;
-	{'DOWN', Ref, _, _, _} ->
-	    demonitor(Ref),
-	    ok
+        exit ->
+            ok;
+        {'DOWN', Ref, _, _, _} ->
+            demonitor(Ref),
+            ok
     end.    
 
 next_line(Reader) ->
@@ -119,18 +119,18 @@ get_next_line({csv_reader, Pid}) ->
     Ref = monitor(process, Pid),
     Pid ! {more, Self},
     receive
-	{row, Self, Item, Id} ->
-	    demonitor(Ref),
-	    {row, Item, Id};
-	{annotation, Self, Kv} ->
-	    demonitor(Ref),
-	    {annotation, Kv};
-	{eof, Self} ->
-	    demonitor(Ref),
-	    eof;
-	{'DOWN', Ref, _, _, _} ->
-	    demonitor(Ref),
-	    eof		
+        {row, Self, Item, Id} ->
+            demonitor(Ref),
+            {row, Item, Id};
+        {annotation, Self, Kv} ->
+            demonitor(Ref),
+            {annotation, Kv};
+        {eof, Self} ->
+            demonitor(Ref),
+            eof;
+        {'DOWN', Ref, _, _, _} ->
+            demonitor(Ref),
+            eof         
     end.
 
 get_next_raw({csv_reader, Pid}) ->
@@ -138,15 +138,15 @@ get_next_raw({csv_reader, Pid}) ->
     Ref = monitor(process, Pid),
     Pid ! {raw, Self},
     receive
-	{raw, Self, Item, Id} ->
-	    demonitor(Ref),
-	    {ok, Item, Id};
-	{eof, Self} ->
-	    demonitor(Ref),
-	    eof;
-	{'DOWN', Ref, _, _, _} ->
-	    demonitor(Ref),
-	    eof
+        {raw, Self, Item, Id} ->
+            demonitor(Ref),
+            {ok, Item, Id};
+        {eof, Self} ->
+            demonitor(Ref),
+            eof;
+        {'DOWN', Ref, _, _, _} ->
+            demonitor(Ref),
+            eof
     end.
 
 binary_eof(<<>>) ->
@@ -167,38 +167,38 @@ binary_next_line(<<Any, Rest/binary>>, Acc) ->
 
 parse_binary_line(Binary, Annot) ->
     case parse_binary_line(Binary, <<>>, []) of
-	{comment, Rest} ->
-	    parse_binary_line(Rest, Annot);
-	{annotation, {Kv, Rest}} ->
-	    if not(Annot) ->
-		    parse_binary_line(Rest, Annot);
-	       true ->
-		    {annotation, {Kv, Rest}}
-	    end;
-	Other ->
-	    {item, Other}
+        {comment, Rest} ->
+            parse_binary_line(Rest, Annot);
+        {annotation, {Kv, Rest}} ->
+            if not(Annot) ->
+                    parse_binary_line(Rest, Annot);
+               true ->
+                    {annotation, {Kv, Rest}}
+            end;
+        Other ->
+            {item, Other}
     end.
 
 end_of_line(Rest, Str, Acc) ->
     Acc0 = case Str of
-	       <<>> ->
-		   Acc;
-		_ ->
-		    [string:strip(binary_to_list(Str))|Acc]
-	   end,
+               <<>> ->
+                   Acc;
+                _ ->
+                    [string:strip(binary_to_list(Str))|Acc]
+           end,
     case Acc0 of
-	[] ->
-	    {comment, Rest};
-	FinalAcc ->
-	    {lists:reverse(FinalAcc), Rest}
+        [] ->
+            {comment, Rest};
+        FinalAcc ->
+            {lists:reverse(FinalAcc), Rest}
     end.
 
 parse_binary_line(<<$%, Annotation, Rest/binary>>, _, _) ->
     case is_annotation(Annotation) of
-	true ->
-	    {annotation, parse_annotation(Rest)};
-	false ->
-	    {comment, skip_line(Rest)}
+        true ->
+            {annotation, parse_annotation(Rest)};
+        false ->
+            {comment, skip_line(Rest)}
     end;
 parse_binary_line(<<$\n, Rest/binary>>, Str, Acc) ->
    end_of_line(Rest, Str, Acc);
@@ -255,16 +255,16 @@ parse_line(Line, Acc) ->
     lists:reverse(parse_line(Line, [], Acc)).
 parse_line([End], Str, Acc) ->
     Str0 = case End of
-	       $\n ->
-		   Str;
-	       _ -> % NOTE: The last line of the file
-		   [End|Str]
-	   end,	
+               $\n ->
+                   Str;
+               _ -> % NOTE: The last line of the file
+                   [End|Str]
+           end, 
     case Str0 of
-	[] ->
-	    Acc;
-	_ ->
-	    [string:strip(lists:reverse(Str0))|Acc]
+        [] ->
+            Acc;
+        _ ->
+            [string:strip(lists:reverse(Str0))|Acc]
     end;
 parse_line([$%|_], _, Acc) ->
     Acc;
