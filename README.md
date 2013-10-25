@@ -6,10 +6,12 @@ Simple csv parser for erlang
 Usage
 
 ```
-Parser = csv:reader("file.csv"),
+Parser = csv:binary_reader("file.csv", [{annotation, true}]),
 case csv:next_line(Parser) of
-     {ok, Line, Id} ->
-     	 io:format("~p: ~p ~n", [Id, Line]);
+     {row, Line, Id} ->
+     	io:format("~p: ~p ~n", [Id, Line]);
+     {annotation, {Key, Value}} ->
+          io:format("~p: ~p ~n", [Key, Value]);
      eof ->
      	 io:format("End of csv-file ~n")
 end
