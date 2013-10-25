@@ -286,7 +286,7 @@ parse_string([I|R], Str, Acc) ->
 
 -ifdef(TEST).
 annotation_test() ->
-    Csv = binary_reader("../test/csv_comment.csv", [{annotations, true}]),
+    {_, Csv} = binary_reader("../test/csv_comment.csv", [{annotations, true}]),
     {annotation, {Url, Http}} = next_line(Csv),
     ?assertEqual(<<"url">>, Url),
     ?assertEqual(<<"http://people.dsv.su.se/~isak-kar">>, Http),
@@ -300,7 +300,7 @@ annotation_test() ->
     ?assertEqual(1, Count).
 
 ignore_annotation_test() ->
-    Csv = binary_reader("../test/csv_comment.csv", [{annotations, false}]),    
+    {_, Csv} = binary_reader("../test/csv_comment.csv", [{annotations, false}]),    
     {row, Line, Count} = next_line(Csv),
     ?assertEqual(["hello", "world"], Line),
     ?assertEqual(1, Count).
