@@ -1,12 +1,14 @@
 erlang-csv
 ==========
 
+Please note that this project is abandoned.
+
 Simple csv parser for erlang
 
 Usage
 
 ```
-Parser = csv:binary_reader("file.csv", [{annotation, true}]),
+{csv, Parser} = csv:binary_reader("file.csv", [{annotation, true}]),
 case csv:next_line(Parser) of
      {row, Line, Id} ->
      	io:format("~p: ~p ~n", [Id, Line]);
